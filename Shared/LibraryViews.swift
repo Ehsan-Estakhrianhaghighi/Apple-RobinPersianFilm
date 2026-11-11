@@ -20,7 +20,9 @@ struct LibraryRootView: View {
             VStack(spacing: 12) {
                 HStack(spacing: 20) {
                     TextField("Search titles", text: $search)
+                        #if os(iOS)
                         .textFieldStyle(.roundedBorder)
+                        #endif
                         .accessibilityLabel("Search movies and series")
                     Picker("Sort", selection: $order) {
                         ForEach(CatalogSort.allCases) { sort in
