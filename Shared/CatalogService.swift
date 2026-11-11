@@ -63,7 +63,7 @@ struct CatalogService {
                 guard poster != nil || heading != nil else { continue }
                 let date = try? link.select("time[datetime], [itemprop=datePublished][content]").first()
                 let rawDate = ((try? date?.attr("datetime")) ?? "").nonEmpty
-                    ?? ((try? date?.attr("content")) ?? "")
+                    ?? ((try? date?.attr("content")) ?? "").nonEmpty
                 let published: Date? = rawDate.flatMap {
                     ISO8601DateFormatter().date(from: $0) ?? ISO8601DateFormatter().date(from: String($0.prefix(10)) + "T00:00:00Z")
                 }
