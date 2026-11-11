@@ -13,3 +13,4 @@ struct RobinPersianFilmAppleApp: App {
                 .task { await library.refresh() }
         }
     }
+}
