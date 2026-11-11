@@ -20,7 +20,7 @@ final class PlaybackSession: ObservableObject {
             if let first = values.first(where: { $0.quality == 720 }) ?? values.first {
                 choose(first)
             }
-        } catch { error = error.localizedDescription }
+        } catch { self.error = error.localizedDescription }
     }
 
     func choose(_ stream: MediaStream) {
