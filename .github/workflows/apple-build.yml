@@ -1,0 +1,34 @@
+name: Apple iOS + tvOS Build
+on:
+  push:
+    paths:
+      - 'Shared/**'
+      - 'project.yml'
+      - 'setup-mac.sh'
+      - '.github/workflows/apple-build.yml'
+  workflow_dispatch:
+jobs:
+  simulator-build:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: RobinPersianFilmIOS
+            sdk: iphonesimulator
+            destination: generic/platform=iOS Simulator
+          - scheme: RobinPersianFilmTV
+            sdk: appletvsimulator
+            destination: generic/platform=tvOS Simulator
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build ${{ matrix.scheme }}
+        run: |
+          xcodebuild -project RobinPersianFilmApple.xcodeproj \
+            -scheme '${{ matrix.scheme }}' -configuration Debug \
+            -sdk '${{ matrix.sdk }}' -destination '${{ matrix.destination }}' \
+            CODE_SIGNING_ALLOWED=NO build
