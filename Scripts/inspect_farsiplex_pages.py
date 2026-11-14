@@ -121,6 +121,13 @@ for url in URLS:
                                                 hits=list(re.finditer(re.escape(word),frame_text,re.I))
                                                 contexts=[scrub(frame_text[max(0,m.start()-100):m.start()+150]) for m in hits[:2]]
                                                 print("frame-hint:",word,"hits:",len(hits),"contexts:",contexts)
+                                            for word in ("var jw =", "let jw =", "const jw =", "sources: [{", "Server 1", "Server 2", "jw.file", "jw.file2"):
+                                                matches = list(re.finditer(re.escape(word),frame_text,re.I))
+                                                for item in matches[:1]:
+                                                    excerpt = frame_text[max(0,item.start()-100):item.start()+1200]
+                                                    excerpt = re.sub(r"https?://[^\\s'\"<>]+","[REDACTED_URL]",excerpt)
+                                                    excerpt = re.sub(r"(?i)(md5|token|sig|signature|auth)=[^&\\s'\"<>]+",r"\\1=[REDACTED]",excerpt)
+                                                    print("frame-config:",word,len(matches),excerpt.replace("\\n"," ")[:1000])
                                         iframe = Trace()
                                         iframe.feed(frame_text)
                                         print("jwplayer scripts:",[
