@@ -54,7 +54,7 @@ actor ProviderHTTP {
 
     func verifyMP4(_ url: URL) async -> Bool {
         guard url.scheme == "https", let host = url.host?.lowercased(),
-              ["pl.farsiplex.buzz", "pl.farsiland.buzz"].contains(host),
+              ["pl.farsiplex.buzz", "pl.farsiland.buzz", "cdn2.farsiland.com"].contains(host),
               url.path.lowercased().hasSuffix(".mp4") else { return false }
 
         // HEAD checks metadata without downloading the movie.
