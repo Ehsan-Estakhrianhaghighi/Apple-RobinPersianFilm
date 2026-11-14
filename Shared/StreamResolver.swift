@@ -13,17 +13,20 @@ struct StreamResolver {
         do {
             return try await resolveFarsiPlex(pageURL: target)
         } catch {
-            // A matching FarsiLand listing can be used solely as the backup player.
-            // The catalog still shows the preferred FarsiPlex entry once.
-            guard let fallback = await CatalogService().farsiLandFallback(for: title) else { throw error }
-            if let episode {
-                let options = (try? await CatalogService().episodes(for: fallback)) ?? []
-                guard let alternative = options.first(where: {
-                    $0.season == episode.season && $0.number == episode.number
-                }) else { throw error }
-                return try await resolveFarsiLand(pageURL: alternative.pageURL)
-            }
-            return try await resolveFarsiLand(pageURL: fallback.pageURL)
+            let primaryError = error
+            // Keep the FarsiPlex diagnostic when a matching FarsiLand fallback
+            // exists but also fails. Do not hide an unreachable published source.
+            guard let fallback = await CatalogService().farsiLandFallback(for: title) else { throw primaryError }
+            do {
+                if let episode {
+                    let options = try await CatalogService().episodes(for: fallback)
+                    guard let alternative = options.first(where: {
+                        $0.season == episode.season && $0.number == episode.number
+                    }) else { throw primaryError }
+                    return try await resolveFarsiLand(pageURL: alternative.pageURL)
+                }
+                return try await resolveFarsiLand(pageURL: fallback.pageURL)
+            } catch { throw primaryError }
         }
     }
 
@@ -131,11 +134,18 @@ struct StreamResolver {
         for form in (try? page.document.select("form[action]").array()) ?? [] {
             guard let target = formAction(form, base: page.url),
                   target.scheme == "https",
-                  hostMatches(target, "farsiplex.com"),
-                  isFarsiPlexPlayerPath(target.path) else { continue }
+                  hostMatches(target, "farsiplex.com") else { continue }
             let method = ((try? form.attr("method")) ?? "get").lowercased()
             guard method == "post" || method == "get" else { continue }
             let fields = formFields(form)
+            // Verified on Balit and Taxi: their public Watch button submits a
+            // single hidden post ID to POST /play/, which redirects to a
+            // title-specific JWPlayer page. Earlier versions ignored /play/.
+            let publicWatchForm = target.path.lowercased() == "/play/" &&
+                method == "post" && fields.count == 1 &&
+                fields[0].0 == "id" && !fields[0].1.isEmpty &&
+                fields[0].1.allSatisfy({ $0.isNumber })
+            guard publicWatchForm || isFarsiPlexPlayerPath(target.path) else { continue }
             let route: PlaybackRoute
             if method == "post" {
                 route = PlaybackRoute(url: target, fields: fields, referer: page.url)
@@ -156,7 +166,8 @@ struct StreamResolver {
 
     private func isFarsiPlexPlayerPath(_ path: String) -> Bool {
         let p = path.lowercased()
-        return p.hasPrefix("/play-quick-view/") ||
+        return p.hasPrefix("/play-") ||
+            p.hasPrefix("/play-quick-view/") ||
             p.hasPrefix("/play-hq-player/") ||
             p.hasPrefix("/watch/") || p.hasPrefix("/stream/")
     }
@@ -179,6 +190,7 @@ struct StreamResolver {
         let first = try await http.page(pageURL)
         var streams = publishedStreams(in: first.html, source: "FarsiPlex")
         streams += linkedMP4Streams(in: first, source: "FarsiPlex")
+        streams += jwPlayerStreams(in: first)
 
         // Try the first-party title -> quick view -> HQ player route. A single
         // page fetch was insufficient for the current FarsiPlex page structure.
@@ -194,11 +206,15 @@ struct StreamResolver {
                                                   referer: next.referer) else { continue }
             var found = publishedStreams(in: page.html, source: "FarsiPlex")
             found += linkedMP4Streams(in: page, source: "FarsiPlex")
+            found += jwPlayerStreams(in: page)
             let path = page.url.path.lowercased()
             let generic = path == "/play-hq-player/" ||
                 path == "/play-quick-view/" ||
                 path == "/play-hq-player" || path == "/play-quick-view"
-            if !generic || hasSelectedTitleEvidence(in: page, titleURL: pageURL, streams: found) {
+            let titleBoundWatch = next.url.path.lowercased() == "/play/" &&
+                next.fields?.contains(where: { $0.0 == "id" }) == true
+            if titleBoundWatch || !generic ||
+                hasSelectedTitleEvidence(in: page, titleURL: pageURL, streams: found) {
                 streams += found
             }
             // Only follow controls actually published by pages reached from
@@ -235,8 +251,58 @@ struct StreamResolver {
         for stream in streams where !valid.contains(where: { $0.url == stream.url }) {
             if await http.verifyMP4(stream.url) { valid.append(stream) }
         }
-        guard !valid.isEmpty else { throw AppProblem.noStream }
+        guard !valid.isEmpty else { throw AppProblem.publishedStreamsUnreachable(found: streams.count) }
         return valid.sorted { $0.quality < $1.quality }
+    }
+
+    // FarsiPlex's actual public Watch form redirects to a player page with
+    // iframe URLs like /jwplayer/?source=https://cdn2.farsiland.com/series/taxi/01.720.mp4.
+    // The source parameter is the provider-published media URL, not the
+    // outer /jwplayer/ URL. Never invent filenames, hosts, or signed tokens.
+    private func jwPlayerStreams(in page: PageResponse) -> [MediaStream] {
+        var results: [MediaStream] = []
+        var seen = Set<URL>()
+        func add(_ raw: String) {
+            guard let wrapper = absoluteURL(raw, base: page.url),
+                  wrapper.scheme == "https",
+                  hostMatches(wrapper, "farsiplex.com"),
+                  wrapper.path.lowercased().hasPrefix("/jwplayer/"),
+                  let components = URLComponents(url: wrapper, resolvingAgainstBaseURL: false),
+                  let candidateText = components.queryItems?.first(where: { $0.name == "source" })?.value,
+                  let url = URL(string: candidateText),
+                  url.scheme == "https",
+                  ["pl.farsiplex.buzz", "pl.farsiland.buzz", "cdn2.farsiland.com"]
+                    .contains(url.host?.lowercased() ?? ""),
+                  url.path.lowercased().hasSuffix(".mp4"),
+                  seen.insert(url).inserted else { return }
+            let quality = firstRegexCapture(
+                #"[.-](360|480|720|1080)(?=(?:\.[^./]+)*\.mp4$)"#, in: url.path
+            ).flatMap(Int.init) ?? 720
+            results.append(MediaStream(url: url, quality: quality, source: "FarsiPlex"))
+        }
+        let elements = (try? page.document.select(
+            "iframe[src], iframe[data-src], a[href], [data-url], [data-src]"
+        ).array()) ?? []
+        for node in elements.prefix(180) {
+            for key in ["src", "data-src", "href", "data-url"] {
+                if node.hasAttr(key), let raw = try? node.attr(key) {
+                    add(raw)
+                }
+            }
+        }
+        // Also detect player URLs in inline markup when no iframe element is
+        // present, e.g. provider JSON-in-script output.
+        let html = page.html.replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "\\/", with: "/")
+        let pattern = #"https://(?:www\.)?farsiplex\.com/jwplayer/\?[^\s'\"<>\\]+"#
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+            for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)).prefix(40) {
+                if let range = Range(match.range, in: html) {
+                    add(String(html[range]))
+                }
+            }
+        }
+        return results
     }
 
     // Some provider pages publish a relative file URL in a source, link,
