@@ -46,6 +46,22 @@ final class PlaybackSession: ObservableObject {
         choose(stream)
     }
 
+    func loadPublishedFarsiPlexURL(_ address: String) async {
+        guard !loading else { return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let values = try await StreamResolver().resolveFarsiPlexPublishedURL(address)
+            streams = values
+            if let best = values.first(where: { $0.quality == 720 }) ?? values.first {
+                choose(best)
+            }
+        } catch {
+            self.error = "The FarsiPlex video link is unavailable, expired, or not a supported MP4."
+        }
+    }
+
     func choose(_ stream: MediaStream) {
         guard stream.url != selected?.url else { return }
         let previousTime = player.currentTime()
@@ -66,6 +82,7 @@ struct PlaybackView: View {
     @EnvironmentObject private var library: LibraryStore
     @StateObject private var session = PlaybackSession()
     @State private var fullScreen = false
+    @State private var publishedFarsiPlexURL = ""
     @State private var directURL = ""
     let title: MediaTitle
     let episode: Episode?
@@ -83,6 +100,18 @@ struct PlaybackView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Try Again") {
                             Task { await session.load(title: title, episode: episode) }
+                        }
+                        if title.provider == .farsiPlex {
+                            Text("Use the exact signed FarsiPlex MP4 link obtained from a working Android browser player. The link must still be valid; the Apple TV app cannot run Android's embedded browser.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Paste FarsiPlex MP4 stream URL", text: $publishedFarsiPlexURL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            Button("Play FarsiPlex Stream URL") {
+                                Task { await session.loadPublishedFarsiPlexURL(publishedFarsiPlexURL) }
+                            }
+                            .disabled(publishedFarsiPlexURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                         Text("Have a direct MP4 URL published by the provider? You can play it here.")
                             .font(.caption)
