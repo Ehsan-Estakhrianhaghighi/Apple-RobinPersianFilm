@@ -42,30 +42,57 @@ struct CatalogService {
             let links = (try? doc.select("a[href]").array()) ?? []
             let expected = provider == .farsiPlex ? (kind == .movie ? "/movie/" : "/tvshow/")
                 : (kind == .movie ? "/movies/" : "/tvshows/")
+            let invalidTitles: Set<String> = ["genres", "genre", "all genres", "movies", "movie",
+                "series", "tv shows", "tv show", "play", "view", "more", "watch", "home", "browse"]
             for link in links {
                 guard let href = try? link.attr("href"),
                       let page = absoluteURL(href, base: response.url),
-                      page.scheme == "https", page.host == response.url.host,
-                      page.path.hasPrefix(expected), page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) != expected.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { continue }
-                let heading = try? link.select("h2,h3,h4").first()?.text()
-                let img = try? link.select("img").first()
-                let title = (heading ?? "").isEmpty
-                    ? ((try? link.attr("title")) ?? "").nonEmpty
-                        ?? ((try? img?.attr("alt")) ?? "").nonEmpty
-                        ?? ((try? link.text()) ?? "")
-                    : heading!
-                let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !clean.isEmpty, clean.count <= 110 else { continue }
-                let posterText = (try? img?.attr("data-src"))?.nonEmpty
-                    ?? (try? img?.attr("data-original"))?.nonEmpty
-                    ?? (try? img?.attr("src"))?.nonEmpty
-                let poster = posterText.flatMap { absoluteURL($0, base: response.url) }
-                guard poster != nil || heading != nil else { continue }
-                let date = try? link.select("time[datetime], [itemprop=datePublished][content]").first()
-                let rawDate = ((try? date?.attr("datetime")) ?? "").nonEmpty
-                    ?? ((try? date?.attr("content")) ?? "").nonEmpty
-                let published: Date? = rawDate.flatMap {
-                    ISO8601DateFormatter().date(from: $0) ?? ISO8601DateFormatter().date(from: String($0.prefix(10)) + "T00:00:00Z")
+                      page.scheme == "https", hostMatches(page, provider == .farsiPlex ? "farsiplex.com" : "farsiland.com"),
+                      page.path.hasPrefix(expected),
+                      page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) !=
+                      expected.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { continue }
+
+                // On both sites the headline and cover may live beside the anchor, not inside it.
+                let container = link.closest("article, li, .item, .movie, .tvshow, .card, .poster, .owl-item")
+                let titleHeading = (try? link.select("h2,h3,h4").first()?.text())?.nonEmpty
+                    ?? (try? link.closest("h2,h3,h4")?.text())?.nonEmpty
+                    ?? (try? container?.select("h2,h3,h4").first()?.text())?.nonEmpty
+                let image = (try? container?.select("img").first())
+                    ?? (try? link.select("img").first())
+                    ?? (try? link.parent()?.select("img").first())
+                    ?? (try? link.parent()?.parent()?.select("img").first())
+                let rawTitle = titleHeading
+                    ?? ((try? link.attr("title")) ?? "").nonEmpty
+                    ?? ((try? link.text()) ?? "").nonEmpty
+                    ?? ((try? image?.attr("alt")) ?? "").nonEmpty
+                    ?? ""
+                let clean = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                let slug = page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    .split(separator: "/").last.map(String.init) ?? ""
+                guard !clean.isEmpty, clean.count <= 110, !invalidTitles.contains(clean.lowercased()),
+                      !invalidTitles.contains(slug.lowercased()) else { continue }
+                guard titleHeading != nil || image != nil || container != nil else { continue }
+
+                var poster: URL?
+                if let image {
+                    for attribute in ["data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"] {
+                        guard let raw = (try? image.attr(attribute))?.nonEmpty,
+                              !raw.hasPrefix("data:") else { continue }
+                        let candidate = raw.components(separatedBy: ",").first?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .components(separatedBy: " ").first ?? ""
+                        if let resolved = absoluteURL(candidate, base: response.url), resolved.scheme == "https" {
+                            poster = resolved
+                            break
+                        }
+                    }
+                }
+                let timeNode = try? container?.select("time[datetime], [itemprop=datePublished][content]").first()
+                let rawDate = ((try? timeNode?.attr("datetime")) ?? "").nonEmpty
+                    ?? ((try? timeNode?.attr("content")) ?? "").nonEmpty
+                let published = rawDate.flatMap {
+                    ISO8601DateFormatter().date(from: $0)
+                        ?? ISO8601DateFormatter().date(from: String($0.prefix(10)) + "T00:00:00Z")
                 }
                 let item = MediaTitle(title: clean, pageURL: page, posterURL: poster,
                                       kind: kind, provider: provider, publishedAt: published,
