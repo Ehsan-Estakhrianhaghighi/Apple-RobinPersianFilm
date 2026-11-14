@@ -99,6 +99,16 @@ struct PlaybackView: View {
                     }
                 }
                 if !session.streams.isEmpty {
+                    if let selected = session.selected {
+                        Text("Playing via \(selected.source)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if title.provider == .farsiPlex && selected.source == "FarsiLand" {
+                            Text("FarsiPlex playback is unavailable for this title; using the matching FarsiLand stream.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Text("Quality").font(.headline)
                     HStack(spacing: 16) {
                         ForEach(session.streams) { stream in
