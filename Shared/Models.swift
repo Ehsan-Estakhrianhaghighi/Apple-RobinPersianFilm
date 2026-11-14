@@ -41,13 +41,14 @@ enum LibraryTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 enum AppProblem: LocalizedError {
-    case invalidPage, noStream, invalidResponse, browserPlaybackRequired
+    case invalidPage, noStream, invalidResponse
+    case browserPlaybackRequired(publishedRoutes: Int, visitedRoutes: Int)
     var errorDescription: String? {
         switch self {
         case .invalidPage: "The provider page could not be read."
         case .noStream: "No authorized playable stream was found for this title."
         case .invalidResponse: "The provider returned an unexpected response."
-        case .browserPlaybackRequired: "FarsiPlex did not publish a verified stream or a title-specific native player route. This title may require an interactive browser session, which tvOS does not support."
+        case .browserPlaybackRequired(let published, let visited): "FarsiPlex did not expose a playable stream. Found \(published) title-page player route(s), checked \(visited) page(s). This title may require browser interaction unavailable on Apple TV."
         }
     }
 }
