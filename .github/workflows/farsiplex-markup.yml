@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - '.github/workflows/farsiplex-markup.yml'
+      - 'Scripts/inspect_farsiplex_pages.py'
   workflow_dispatch:
 jobs:
   inspect:
