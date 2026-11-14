@@ -226,10 +226,21 @@ struct StreamResolver {
             print("FarsiPlex native playback: no title-bound published MP4; checked \(checked) first-party player pages.")
             throw AppProblem.browserPlaybackRequired(publishedRoutes: initialRoutes, visitedRoutes: checked)
         }
-        // Discover only variants of a signed filename actually published and
-        // verified. Reuse its existing query unchanged; no token fabrication.
-        let current = streams
-        for stream in current {
+        // Verify published candidates before trying quality variations.
+        var verified = await verifyPublishedSources(streams)
+        guard !verified.isEmpty else {
+            let hosts = Array(Set(streams.compactMap { $0.url.host?.lowercased() })).sorted()
+            throw AppProblem.publishedStreamsUnreachable(found: streams.count, hosts: hosts)
+        }
+
+        // Only test sibling qualities when the original signed MP4 is playable.
+        // Unsigned CDN links are never fabricated or renamed.
+        let originals = verified
+        for stream in originals {
+            let components = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)
+            guard components?.queryItems?.contains(where: {
+                $0.name.lowercased() == "md5"
+            }) == true else { continue }
             let path = stream.url.path
             let pattern = #"[.-](360|480|720|1080)(?=(?:\.[^./?]+)*\.mp4$)"#
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
@@ -238,21 +249,35 @@ struct StreamResolver {
             for quality in [480, 720, 1080] where quality != stream.quality {
                 var alternativePath = path
                 alternativePath.replaceSubrange(range, with: String(quality))
-                var components = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)
-                components?.path = alternativePath
-                if let variant = components?.url,
-                   !streams.contains(where: { $0.url == variant }),
-                   await http.verifyMP4(variant) {
-                    streams.append(MediaStream(url: variant, quality: quality, source: stream.source))
+                var candidate = components
+                candidate?.path = alternativePath
+                if let url = candidate?.url,
+                   !verified.contains(where: { $0.url == url }),
+                   await http.verifyMP4(url) {
+                    verified.append(MediaStream(url: url, quality: quality, source: stream.source))
                 }
             }
         }
-        var valid: [MediaStream] = []
-        for stream in streams where !valid.contains(where: { $0.url == stream.url }) {
-            if await http.verifyMP4(stream.url) { valid.append(stream) }
+        return verified.sorted { $0.quality < $1.quality }
+    }
+
+    // Check independent published media URLs concurrently, not serially.
+    private func verifyPublishedSources(_ candidates: [MediaStream]) async -> [MediaStream] {
+        var seen = Set<URL>()
+        let unique = candidates.filter { seen.insert($0.url).inserted }
+        return await withTaskGroup(of: (Int, MediaStream?).self) { group in
+            for (index, stream) in unique.enumerated() {
+                group.addTask {
+                    let playable = await ProviderHTTP.shared.verifyMP4(stream.url)
+                    return (index, playable ? stream : nil)
+                }
+            }
+            var available: [(Int, MediaStream)] = []
+            for await (index, stream) in group {
+                if let stream { available.append((index, stream)) }
+            }
+            return available.sorted { $0.0 < $1.0 }.map { $0.1 }
         }
-        guard !valid.isEmpty else { throw AppProblem.publishedStreamsUnreachable(found: streams.count) }
-        return valid.sorted { $0.quality < $1.quality }
     }
 
     // FarsiPlex's actual public Watch form redirects to a player page with
