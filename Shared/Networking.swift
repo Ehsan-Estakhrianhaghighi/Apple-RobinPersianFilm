@@ -56,18 +56,44 @@ actor ProviderHTTP {
         guard url.scheme == "https", let host = url.host?.lowercased(),
               ["pl.farsiplex.buzz", "pl.farsiland.buzz"].contains(host),
               url.path.lowercased().hasSuffix(".mp4") else { return false }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
-        request.timeoutInterval = 12
-        do {
-            let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return false }
+
+        // HEAD checks metadata without downloading the movie.
+        var head = URLRequest(url: url)
+        head.httpMethod = "HEAD"
+        head.timeoutInterval = 12
+        if let (_, response) = try? await session.data(for: head),
+           let http = response as? HTTPURLResponse,
+           (200...299).contains(http.statusCode) {
             let type = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
-            return (http.statusCode == 200 || http.statusCode == 206) &&
-                (type.contains("video") || type.contains("octet-stream"))
+            if type.contains("video/") || type.contains("octet-stream") { return true }
+        }
+
+        // Some media servers do not implement HEAD. A streamed Range request
+        // examines only the opening bytes; do NOT use session.data(for:)
+        // here, which could buffer the entire movie.
+        var probe = URLRequest(url: url)
+        probe.httpMethod = "GET"
+        probe.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+        probe.timeoutInterval = 12
+        do {
+            let (bytes, response) = try await session.bytes(for: probe)
+            guard let http = response as? HTTPURLResponse,
+                  http.statusCode == 206 || http.statusCode == 200 else { return false }
+            let type = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            if type.contains("text/html") || type.contains("application/json") { return false }
+            var prefix: [UInt8] = []
+            prefix.reserveCapacity(32)
+            for try await byte in bytes {
+                prefix.append(byte)
+                if prefix.count >= 32 { break }
+            }
+            let looksLikeMP4 = prefix.count >= 8 &&
+                String(decoding: prefix[4..<8], as: UTF8.self) == "ftyp"
+            return looksLikeMP4 || (prefix.count > 0 &&
+                (type.contains("video/") || type.contains("octet-stream")))
         } catch { return false }
     }
+
 }
 
 func absoluteURL(_ text: String, base: URL) -> URL? {
