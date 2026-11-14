@@ -252,7 +252,7 @@ struct StreamResolver {
                       let value = try? node.attr(attribute),
                       let url = absoluteURL(value, base: page.url),
                       url.scheme == "https",
-                      ["pl.farsiplex.buzz", "pl.farsiland.buzz"].contains(url.host?.lowercased() ?? ""),
+                      url.host?.lowercased() == (source == "FarsiPlex" ? "pl.farsiplex.buzz" : "pl.farsiland.buzz"),
                       url.path.lowercased().hasSuffix(".mp4"),
                       seen.insert(url).inserted else { continue }
                 let quality = firstRegexCapture(
@@ -286,6 +286,7 @@ struct StreamResolver {
         return regex.matches(in: unescaped, range: NSRange(unescaped.startIndex..., in: unescaped)).compactMap { match -> MediaStream? in
             guard let range = Range(match.range, in: unescaped),
                   let url = URL(string: String(unescaped[range]).replacingOccurrences(of: "&quot;", with: "")),
+                  url.host?.lowercased() == (source == "FarsiPlex" ? "pl.farsiplex.buzz" : "pl.farsiland.buzz"),
                   urls.insert(url).inserted else { return nil }
             let quality = firstRegexCapture(#"[.-](480|720|1080)(?=(?:\.[^./?]+)*\.mp4)"#, in: url.path).flatMap(Int.init)
                 ?? qualityHint ?? 720
