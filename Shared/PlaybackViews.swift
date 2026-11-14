@@ -23,6 +23,29 @@ final class PlaybackSession: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
+    // Optional fallback when a provider requires a browser-only step and the
+    // viewer has an authorized direct CDN link for this particular title.
+    func loadDirectURL(_ text: String) async {
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: raw) else {
+            error = "Enter a valid full HTTPS MP4 URL."
+            return
+        }
+        loading = true
+        defer { loading = false }
+        guard await ProviderHTTP.shared.verifyMP4(url) else {
+            error = "This URL could not be verified as a playable FarsiPlex or FarsiLand MP4."
+            return
+        }
+        let quality = firstRegexCapture(#"[.-](480|720|1080)(?=(?:\.[^./?]+)*\.mp4)"#, in: url.path)
+            .flatMap(Int.init) ?? 720
+        let stream = MediaStream(url: url, quality: quality, source: "Direct provider URL")
+        streams = [stream]
+        selected = nil
+        error = nil
+        choose(stream)
+    }
+
     func choose(_ stream: MediaStream) {
         guard stream.url != selected?.url else { return }
         let previousTime = player.currentTime()
@@ -43,6 +66,7 @@ struct PlaybackView: View {
     @EnvironmentObject private var library: LibraryStore
     @StateObject private var session = PlaybackSession()
     @State private var fullScreen = false
+    @State private var directURL = ""
     let title: MediaTitle
     let episode: Episode?
 
@@ -60,6 +84,18 @@ struct PlaybackView: View {
                         Button("Try Again") {
                             Task { await session.load(title: title, episode: episode) }
                         }
+                        Text("Have a direct MP4 URL published by the provider? You can play it here.")
+                            .font(.caption)
+                        TextField("https://pl.farsiplex.buzz/...mp4?md5=...", text: $directURL)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            #endif
+                        Button("Play Direct URL") {
+                            Task { await session.loadDirectURL(directURL) }
+                        }
+                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 if !session.streams.isEmpty {
