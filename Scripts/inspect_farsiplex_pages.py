@@ -60,6 +60,21 @@ for q in ("Taxi","Balit","Mashghe Emshab","Ostokhan Sooz","Meymoone Mast"):
     except Exception as e:
         print("farsiland-search",q,"error",type(e).__name__)
 
+for path in ("/tvshows/ostokhan-sooz/", "/episodes/ostokhan-sooz-ep01/",
+             "/tvshows/taxi/", "/episodes/taxi-ep01/"):
+    try:
+        testurl="https://farsiland.com"+path
+        with urlopen(Request(testurl,headers={"User-Agent":"Mozilla/5.0"}),timeout=9) as response:
+            body=response.read(180000).decode("utf-8",errors="replace")
+            p=Trace()
+            p.feed(body)
+            print("farsiland-public",path,response.status,"bytes",len(body),
+                  "forms",[(form["method"],urlparse(form["action"]).hostname,
+                             urlparse(form["action"]).path, [x[0] for x in form["fields"]][:9])
+                           for form in p.forms[:12]])
+    except Exception as e:
+        print("farsiland-public",path,"error",type(e).__name__)
+
 for url in URLS:
     print("\nTITLE:",url,flush=True)
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
