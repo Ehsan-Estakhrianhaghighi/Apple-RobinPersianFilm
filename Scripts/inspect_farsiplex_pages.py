@@ -48,9 +48,10 @@ class Trace(HTMLParser):
 
 for url in URLS:
     print("\nTITLE:",url,flush=True)
+    opener = build_opener(HTTPCookieProcessor(CookieJar()))
     req = Request(url,headers={"User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36","Accept":"text/html"})
     try:
-        with urlopen(req,timeout=12) as response:
+        with opener.open(req,timeout=12) as response:
             raw=response.read(1_400_000)
             code=response.status
             final=response.geturl()
@@ -70,7 +71,6 @@ for url in URLS:
                       set(f["data"]) == {"id"}), None)
         if watch and watch["data"]["id"].isdigit():
             try:
-                opener = build_opener(HTTPCookieProcessor(CookieJar()))
                 post = Request("https://farsiplex.com/play/",
                     data=urlencode(watch["data"]).encode("ascii"),
                     headers={"User-Agent":"Mozilla/5.0 Chrome/120.0 Safari/537.36",
