@@ -23,29 +23,6 @@ final class PlaybackSession: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    // Optional fallback when a provider requires a browser-only step and the
-    // viewer has an authorized direct CDN link for this particular title.
-    func loadDirectURL(_ text: String) async {
-        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: raw) else {
-            error = "Enter a valid full HTTPS MP4 URL."
-            return
-        }
-        loading = true
-        defer { loading = false }
-        guard await ProviderHTTP.shared.verifyMP4(url) else {
-            error = "This URL could not be verified as a playable FarsiPlex or FarsiLand MP4."
-            return
-        }
-        let quality = firstRegexCapture(#"[.-](480|720|1080)(?=(?:\.[^./?]+)*\.mp4)"#, in: url.path)
-            .flatMap(Int.init) ?? 720
-        let stream = MediaStream(url: url, quality: quality, source: "Direct provider URL")
-        streams = [stream]
-        selected = nil
-        error = nil
-        choose(stream)
-    }
-
     func loadPublishedFarsiPlexURL(_ address: String) async {
         guard !loading else { return }
         loading = true
@@ -83,7 +60,6 @@ struct PlaybackView: View {
     @StateObject private var session = PlaybackSession()
     @State private var fullScreen = false
     @State private var publishedFarsiPlexURL = ""
-    @State private var directURL = ""
     let title: MediaTitle
     let episode: Episode?
 
@@ -96,7 +72,7 @@ struct PlaybackView: View {
                 if let error = session.error {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(error).foregroundStyle(.secondary)
-                        Text("Some titles require a provider browser session. No unsupported or expired stream is substituted.")
+                        Text(title.provider == .farsiPlex ? "FarsiPlex uses an interactive browser player for some titles. Apple TV cannot access Android WebView sessions, so automatic resolution is not available for this title." : "The provider did not return a verified playable stream.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Try Again") {
                             Task { await session.load(title: title, episode: episode) }
@@ -113,18 +89,7 @@ struct PlaybackView: View {
                             }
                             .disabled(publishedFarsiPlexURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
-                        Text("Have a direct MP4 URL published by the provider? You can play it here.")
-                            .font(.caption)
-                        TextField("https://pl.farsiplex.buzz/...mp4?md5=...", text: $directURL)
-                            #if os(iOS)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
-                            #endif
-                        Button("Play Direct URL") {
-                            Task { await session.loadDirectURL(directURL) }
-                        }
-                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                     }
                 }
                 if !session.streams.isEmpty {
