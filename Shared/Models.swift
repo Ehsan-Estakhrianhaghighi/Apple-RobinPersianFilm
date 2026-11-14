@@ -42,14 +42,14 @@ enum LibraryTab: String, CaseIterable, Identifiable {
 }
 enum AppProblem: LocalizedError {
     case invalidPage, noStream, invalidResponse
-    case browserPlaybackRequired(publishedRoutes: Int, visitedRoutes: Int)
+    case browserPlaybackRequired(publishedRoutes: Int, visitedRoutes: Int, pagePath: String, formTags: Int)
     case publishedStreamsUnreachable(found: Int, hosts: [String])
     var errorDescription: String? {
         switch self {
         case .invalidPage: "The provider page could not be read."
         case .noStream: "No authorized playable stream was found for this title."
         case .invalidResponse: "The provider returned an unexpected response."
-        case .browserPlaybackRequired(let published, let visited): "FarsiPlex did not expose a playable stream. Found \(published) title-page player route(s), checked \(visited) page(s). This title may require browser interaction unavailable on Apple TV."
+        case .browserPlaybackRequired(let published, let visited, let path, let forms): "FarsiPlex player not resolved. Page: \(path). HTML form tags: \(forms). Player routes: \(published). Pages checked: \(visited). If forms are missing, the provider returned a different page; otherwise the published watch route may require browser interaction."
         case .publishedStreamsUnreachable(let found, let hosts): "FarsiPlex published \(found) video source(s), but none passed the connection check. The provider media host(s) could be offline or unavailable: \(hosts.joined(separator: ", ")). Please retry later. No unrelated video is substituted."
         }
     }
