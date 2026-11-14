@@ -92,50 +92,141 @@ struct StreamResolver {
         return verified.sorted { $0.quality < $1.quality }
     }
 
+    // tvOS does not offer Android WebView. Follow only FarsiPlex player links
+    // actually published by this selected title, retaining server cookies,
+    // POST fields, and Referer. This supports native HTTP-based player flows,
+    // but it never claims to execute JavaScript or complete access prompts.
+    private struct PlaybackRoute {
+        let url: URL
+        let fields: [(String, String)]?
+        let referer: URL
+
+        var key: String {
+            let payload = fields?.map { "\($0.0)=\($0.1)" }.joined(separator: "&") ?? ""
+            return url.absoluteString + "|" + payload
+        }
+    }
+
+    private func publishedPlaybackRoutes(in page: PageResponse) -> [PlaybackRoute] {
+        var result: [PlaybackRoute] = []
+        var seen = Set<String>()
+        let nodes = (try? page.document.select(
+            "a[href], iframe[src], [data-href], [data-url], [data-src]"
+        ).array()) ?? []
+        for node in nodes.prefix(240) {
+            for attr in ["href", "src", "data-href", "data-url", "data-src"] {
+                guard node.hasAttr(attr),
+                      let raw = try? node.attr(attr),
+                      let url = absoluteURL(raw, base: page.url),
+                      url.scheme == "https",
+                      hostMatches(url, "farsiplex.com"),
+                      isFarsiPlexPlayerPath(url.path) else { continue }
+                let route = PlaybackRoute(url: url, fields: nil, referer: page.url)
+                if seen.insert(route.key).inserted { result.append(route) }
+            }
+        }
+        // Some title-specific player buttons submit a provider form, not a link.
+        // Only submit a form whose action explicitly targets a player route.
+        // Login, advertisement and payment forms are never submitted.
+        for form in (try? page.document.select("form[action]").array()) ?? [] {
+            guard let target = formAction(form, base: page.url),
+                  target.scheme == "https",
+                  hostMatches(target, "farsiplex.com"),
+                  isFarsiPlexPlayerPath(target.path) else { continue }
+            let method = ((try? form.attr("method")) ?? "get").lowercased()
+            guard method == "post" || method == "get" else { continue }
+            let fields = formFields(form)
+            let route: PlaybackRoute
+            if method == "post" {
+                route = PlaybackRoute(url: target, fields: fields, referer: page.url)
+            } else if fields.isEmpty {
+                route = PlaybackRoute(url: target, fields: nil, referer: page.url)
+            } else {
+                var components = URLComponents(url: target, resolvingAgainstBaseURL: false)
+                var queries = components?.queryItems ?? []
+                queries += fields.map { URLQueryItem(name: $0.0, value: $0.1) }
+                components?.queryItems = queries
+                guard let nextURL = components?.url else { continue }
+                route = PlaybackRoute(url: nextURL, fields: nil, referer: page.url)
+            }
+            if seen.insert(route.key).inserted { result.append(route) }
+        }
+        return result
+    }
+
+    private func isFarsiPlexPlayerPath(_ path: String) -> Bool {
+        let p = path.lowercased()
+        return p.hasPrefix("/play-quick-view/") ||
+            p.hasPrefix("/play-hq-player/") ||
+            p.hasPrefix("/watch/") || p.hasPrefix("/stream/")
+    }
+
+    private func hasSelectedTitleEvidence(in page: PageResponse, titleURL: URL,
+                                          streams: [MediaStream]) -> Bool {
+        let titleSlug = titleURL.path.split(separator: "/").last.map(String.init) ?? ""
+        let token = normalizedTitle(titleSlug)
+        guard token.count >= 4 else { return false }
+        // The generic HQ player may show unrelated editorial articles if it
+        // has no current-title state. Don't play a random video from that page.
+        if page.html.localizedCaseInsensitiveContains(titleSlug) { return true }
+        return streams.contains { stream in
+            let mediaName = normalizedTitle(stream.url.deletingPathExtension().lastPathComponent)
+            return mediaName.contains(token) || token.contains(mediaName)
+        }
+    }
+
     private func resolveFarsiPlex(pageURL: URL) async throws -> [MediaStream] {
         let first = try await http.page(pageURL)
         var streams = publishedStreams(in: first.html, source: "FarsiPlex")
         streams += linkedMP4Streams(in: first, source: "FarsiPlex")
-        if streams.isEmpty {
-            // Visit player pages published by this title. A generic player page
-            // without title-specific context cannot identify which movie to load.
-            let nodes = (try? first.document.select("a[href], iframe[src], [data-href], [data-url]").array()) ?? []
-            var visited = Set<URL>()
-            for node in nodes.prefix(180) {
-                let attribute = node.tagName() == "iframe" ? "src"
-                    : (node.hasAttr("href") ? "href" : (node.hasAttr("data-href") ? "data-href" : "data-url"))
-                let raw = (try? node.attr(attribute)) ?? ""
-                guard let url = absoluteURL(raw, base: first.url),
-                      hostMatches(url, "farsiplex.com"),
-                      url.path.contains("play-") || url.path.contains("/watch/"),
-                      visited.insert(url).inserted else { continue }
-                // Without a query or dedicated player slug, this route can be a
-                // shared landing page requiring an interactive browser session.
-                let hasContext = url.query != nil ||
-                    url.path.split(separator: "/").count > 1 ||
-                    node.tagName() == "iframe"
-                guard hasContext else { continue }
-                guard let page = try? await http.page(url, referer: first.url) else { continue }
-                streams += publishedStreams(in: page.html, source: "FarsiPlex")
-                streams += linkedMP4Streams(in: page, source: "FarsiPlex")
-                if !streams.isEmpty { break }
+
+        // Try the first-party title -> quick view -> HQ player route. A single
+        // page fetch was insufficient for the current FarsiPlex page structure.
+        var routes = publishedPlaybackRoutes(in: first)
+        var visited = Set<String>()
+        var checked = 0
+        while !routes.isEmpty && checked < 8 && streams.isEmpty {
+            let next = routes.removeFirst()
+            guard visited.insert(next.key).inserted else { continue }
+            checked += 1
+            guard let page = try? await http.page(next.url, fields: next.fields,
+                                                  referer: next.referer) else { continue }
+            var found = publishedStreams(in: page.html, source: "FarsiPlex")
+            found += linkedMP4Streams(in: page, source: "FarsiPlex")
+            let path = page.url.path.lowercased()
+            let generic = path == "/play-hq-player/" ||
+                path == "/play-quick-view/" ||
+                path == "/play-hq-player" || path == "/play-quick-view"
+            if !generic || hasSelectedTitleEvidence(in: page, titleURL: pageURL, streams: found) {
+                streams += found
             }
+            // Only follow controls actually published by pages reached from
+            // this title. Never discover arbitrary movie URLs across the site.
+            routes += publishedPlaybackRoutes(in: page)
         }
-        // MP4 quality variants can use suffixes like "-720.new.mp4".
+
+        guard !streams.isEmpty else {
+            print("FarsiPlex native playback: no title-bound published MP4; checked \(checked) first-party player pages.")
+            throw AppProblem.noStream
+        }
+        // Discover only variants of a signed filename actually published and
+        // verified. Reuse its existing query unchanged; no token fabrication.
         let current = streams
         for stream in current {
-            let raw = stream.url.absoluteString
-            let pattern = #"[.-](360|480|720|1080)(?=(?:\.[^./?]+)*\.mp4)"#
+            let path = stream.url.path
+            let pattern = #"[.-](360|480|720|1080)(?=(?:\.[^./?]+)*\.mp4$)"#
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-                  let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
-                  let range = Range(match.range(at: 1), in: raw) else { continue }
+                  let match = regex.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)),
+                  let range = Range(match.range(at: 1), in: path) else { continue }
             for quality in [480, 720, 1080] where quality != stream.quality {
-                var changed = raw
-                changed.replaceSubrange(range, with: String(quality))
-                if let url = URL(string: changed),
-                   !streams.contains(where: { $0.url == url }),
-                   await http.verifyMP4(url) {
-                    streams.append(MediaStream(url: url, quality: quality, source: stream.source))
+                var alternativePath = path
+                alternativePath.replaceSubrange(range, with: String(quality))
+                var components = URLComponents(url: stream.url, resolvingAgainstBaseURL: false)
+                components?.path = alternativePath
+                if let variant = components?.url,
+                   !streams.contains(where: { $0.url == variant }),
+                   await http.verifyMP4(variant) {
+                    streams.append(MediaStream(url: variant, quality: quality, source: stream.source))
                 }
             }
         }
