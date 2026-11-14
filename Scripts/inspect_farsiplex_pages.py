@@ -2,7 +2,7 @@
 """Read-only inspection of public FarsiPlex title pages. No playback or ad bypass."""
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
-from urllib.parse import urlencode
+from urllib.parse import urlencode, parse_qs, unquote
 from http.cookiejar import CookieJar
 from urllib.parse import urlparse, urljoin
 import re
@@ -91,6 +91,12 @@ for url in URLS:
                         u=urlparse(m.group(0).split("&quot;")[0])
                         print("media:",{"host":u.hostname,"path":u.path,
                                         "hasQuery":bool(u.query)})
+                        for k,vals in parse_qs(u.query).items():
+                            for val in vals[:2]:
+                                inner = urlparse(unquote(val))
+                                print("media-query:", {"key":k,"valueHost":inner.hostname,
+                                    "valuePath":inner.path if inner.hostname else "",
+                                    "length":len(val)})
                     follow = Trace()
                     follow.feed(follow_html)
                     for f2 in follow.forms:
