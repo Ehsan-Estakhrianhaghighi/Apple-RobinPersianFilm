@@ -10,7 +10,21 @@ struct StreamResolver {
         if title.provider == .farsiLand {
             return try await resolveFarsiLand(pageURL: target)
         }
-        return try await resolveFarsiPlex(pageURL: target)
+        do {
+            return try await resolveFarsiPlex(pageURL: target)
+        } catch {
+            // A matching FarsiLand listing can be used solely as the backup player.
+            // The catalog still shows the preferred FarsiPlex entry once.
+            guard let fallback = await CatalogService().farsiLandFallback(for: title) else { throw error }
+            if let episode {
+                let options = (try? await CatalogService().episodes(for: fallback)) ?? []
+                guard let alternative = options.first(where: {
+                    $0.season == episode.season && $0.number == episode.number
+                }) else { throw error }
+                return try await resolveFarsiLand(pageURL: alternative.pageURL)
+            }
+            return try await resolveFarsiLand(pageURL: fallback.pageURL)
+        }
     }
 
     private func resolveFarsiLand(pageURL: URL) async throws -> [MediaStream] {
