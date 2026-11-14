@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor, HTTPRedirectHandler
 from urllib.parse import urlencode, parse_qs, unquote
 from http.cookiejar import CookieJar
+import socket
 from urllib.parse import urlparse, urljoin
 import re
 
@@ -97,6 +98,30 @@ for url in URLS:
                                 print("media-query:", {"key":k,"valueHost":inner.hostname,
                                     "valuePath":inner.path if inner.hostname else "",
                                     "length":len(val)})
+                                if k == "source":
+                                    try:
+                                        socket.getaddrinfo(inner.hostname,443)
+                                        print("dns:",inner.hostname,"resolves")
+                                    except Exception as dns_error:
+                                        print("dns:",inner.hostname,type(dns_error).__name__)
+                                    try:
+                                        frame_request = Request(m.group(0).split("&quot;")[0],
+                                            headers={"User-Agent":"Mozilla/5.0 Chrome/120.0 Safari/537.36",
+                                                     "Referer":follow_url})
+                                        with opener.open(frame_request,timeout=9) as frame:
+                                            frame_text=frame.read(150000).decode("utf-8",errors="replace")
+                                            print("jwplayer:",frame.status,"html_bytes",len(frame_text))
+                                        print("jwplayer contains:",{
+                                            k:len(re.findall(re.escape(k),frame_text,re.I))
+                                            for k in ("cdn2.farsiland.com","pl.farsiplex.buzz","video","source",
+                                                      "fetch(","xmlhttprequest","player.setup","jwplayer(", ".mp4")})
+                                        iframe = Trace()
+                                        iframe.feed(frame_text)
+                                        print("jwplayer scripts:",[
+                                            urlparse(urljoin("https://farsiplex.com/jwplayer/",sc)).path
+                                            for sc in iframe.scripts[:20]])
+                                    except Exception as frame_error:
+                                        print("jwplayer-error:",type(frame_error).__name__,scrub(str(frame_error)))
                                 if k == "source" and inner.hostname in {"cdn2.farsiland.com","pl.farsiplex.buzz"}:
                                     try:
                                         check = Request(val,method="HEAD",
