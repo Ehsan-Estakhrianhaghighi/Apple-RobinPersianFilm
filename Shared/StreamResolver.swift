@@ -141,14 +141,17 @@ struct StreamResolver {
             // Verified on Balit and Taxi: their public Watch button submits a
             // single hidden post ID to POST /play/, which redirects to a
             // title-specific JWPlayer page. Earlier versions ignored /play/.
+            let formID = ((try? form.attr("id")) ?? "").lowercased()
+            let titleID = fields.first(where: { $0.0 == "id" })?.1 ?? ""
             let publicWatchForm = target.path.lowercased() == "/play/" &&
-                method == "post" && fields.count == 1 &&
-                fields[0].0 == "id" && !fields[0].1.isEmpty &&
-                fields[0].1.allSatisfy({ $0.isNumber })
+                method == "post" && formID.hasPrefix("watch-") &&
+                !titleID.isEmpty && titleID.allSatisfy({ $0.isNumber })
             guard publicWatchForm || isFarsiPlexPlayerPath(target.path) else { continue }
             let route: PlaybackRoute
             if method == "post" {
-                route = PlaybackRoute(url: target, fields: fields, referer: page.url)
+                route = PlaybackRoute(url: target,
+                    fields: publicWatchForm ? [("id", titleID)] : fields,
+                    referer: page.url)
             } else if fields.isEmpty {
                 route = PlaybackRoute(url: target, fields: nil, referer: page.url)
             } else {
@@ -162,6 +165,48 @@ struct StreamResolver {
             if seen.insert(route.key).inserted { result.append(route) }
         }
         return result
+    }
+
+    // The provider publishes a standard POST /play/ form with a hidden
+    // numeric id on each title. Some malformed HTML can cause a DOM parser
+    // to move/drop form elements. Parse only this exact public form as a
+    // last-resort fallback, without inventing links or bypassing access checks.
+    private func watchRouteFromRawHTML(in page: PageResponse) -> PlaybackRoute? {
+        let pattern = #"(?is)<form\b([^>]*)>(.*?)</form\s*>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let inputs = try? NSRegularExpression(pattern: #"(?is)<input\b[^>]*>"#) else {
+            return nil
+        }
+        let html = page.html
+        let fullRange = NSRange(html.startIndex..., in: html)
+        for form in regex.matches(in: html, range: fullRange).prefix(100) {
+            guard let headRange = Range(form.range(at: 1), in: html),
+                  let bodyRange = Range(form.range(at: 2), in: html) else { continue }
+            let head = String(html[headRange])
+            let action = firstRegexCapture(#"(?i)\baction\s*=\s*['"]([^'"]+)['"]"#, in: head) ?? ""
+            let method = firstRegexCapture(#"(?i)\bmethod\s*=\s*['"]([^'"]+)['"]"#, in: head) ?? "get"
+            let formID = firstRegexCapture(#"(?i)\bid\s*=\s*['"]([^'"]+)['"]"#, in: head) ?? ""
+            guard formID.lowercased().hasPrefix("watch-"), method.lowercased() == "post",
+                  let url = absoluteURL(action, base: page.url),
+                  url.scheme == "https", hostMatches(url, "farsiplex.com"),
+                  url.path.lowercased() == "/play/" else { continue }
+            let body = String(html[bodyRange])
+            for match in inputs.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
+                guard let inputRange = Range(match.range, in: body) else { continue }
+                let input = String(body[inputRange])
+                let name = firstRegexCapture(#"(?i)\bname\s*=\s*['"]([^'"]+)['"]"#, in: input) ?? ""
+                guard name == "id",
+                      let titleID = firstRegexCapture(#"(?i)\bvalue\s*=\s*['"]([^'"]+)['"]"#, in: input),
+                      !titleID.isEmpty, titleID.allSatisfy({ $0.isNumber }) else { continue }
+                return PlaybackRoute(url: url, fields: [("id", titleID)], referer: page.url)
+            }
+        }
+        return nil
+    }
+
+    private func watchFormTagCount(in page: PageResponse) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: #"(?i)<form\b"#) else { return 0 }
+        return regex.numberOfMatches(in: page.html, range: NSRange(page.html.startIndex..., in: page.html))
     }
 
     private func isFarsiPlexPlayerPath(_ path: String) -> Bool {
@@ -195,6 +240,11 @@ struct StreamResolver {
         // Try the first-party title -> quick view -> HQ player route. A single
         // page fetch was insufficient for the current FarsiPlex page structure.
         var routes = publishedPlaybackRoutes(in: first)
+        // Prioritize the exact title's published Watch form.
+        if let watch = watchRouteFromRawHTML(in: first) {
+            routes.removeAll { $0.key == watch.key }
+            routes.insert(watch, at: 0)
+        }
         let initialRoutes = routes.count
         var visited = Set<String>()
         var checked = 0
@@ -224,7 +274,10 @@ struct StreamResolver {
 
         guard !streams.isEmpty else {
             print("FarsiPlex native playback: no title-bound published MP4; checked \(checked) first-party player pages.")
-            throw AppProblem.browserPlaybackRequired(publishedRoutes: initialRoutes, visitedRoutes: checked)
+            throw AppProblem.browserPlaybackRequired(
+                publishedRoutes: initialRoutes, visitedRoutes: checked,
+                pagePath: first.url.path, formTags: watchFormTagCount(in: first)
+            )
         }
         // Verify published candidates before trying quality variations.
         var verified = await verifyPublishedSources(streams)
