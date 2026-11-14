@@ -1,0 +1,14 @@
+name: Inspect FarsiPlex title markup
+on:
+  push:
+    paths:
+      - '.github/workflows/farsiplex-markup.yml'
+  workflow_dispatch:
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect publicly published title markup (read only)
+        run: python3 Scripts/inspect_farsiplex_pages.py
