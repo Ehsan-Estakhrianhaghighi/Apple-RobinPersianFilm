@@ -52,34 +52,39 @@ struct CatalogService {
                       page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) !=
                       expected.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { continue }
 
-                // On both sites the headline and cover may live beside the anchor, not inside it.
-                let container = link.closest("article, li, .item, .movie, .tvshow, .card, .poster, .owl-item")
-                let titleHeading = (try? link.select("h2,h3,h4").first()?.text())?.nonEmpty
-                    ?? (try? link.closest("h2,h3,h4")?.text())?.nonEmpty
-                    ?? (try? container?.select("h2,h3,h4").first()?.text())?.nonEmpty
-                let image = (try? container?.select("img").first())
-                    ?? (try? link.select("img").first())
-                    ?? (try? link.parent()?.select("img").first())
-                    ?? (try? link.parent()?.parent()?.select("img").first())
-                let rawTitle = titleHeading
-                    ?? ((try? link.attr("title")) ?? "").nonEmpty
-                    ?? ((try? link.text()) ?? "").nonEmpty
-                    ?? ((try? image?.attr("alt")) ?? "").nonEmpty
-                    ?? ""
-                let clean = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                let slug = page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                // Provider card titles and images can be on the link or on a nearby ancestor.
+                let parent = link.parent()
+                let grandparent = parent?.parent()
+                let greatGrandparent = grandparent?.parent()
+                let ownHeading: String? = try? link.select("h2,h3,h4").first()?.text()
+                let parentHeading: String? = try? parent?.select("h2,h3,h4").first()?.text()
+                let grandHeading: String? = try? grandparent?.select("h2,h3,h4").first()?.text()
+                let ownImage: Element? = try? link.select("img").first()
+                let parentImage: Element? = try? parent?.select("img").first()
+                let grandImage: Element? = try? grandparent?.select("img").first()
+                let greatImage: Element? = try? greatGrandparent?.select("img").first()
+                let image = ownImage ?? parentImage ?? grandImage ?? greatImage
+                let titleHeading = ownHeading?.nonEmpty ?? parentHeading?.nonEmpty ?? grandHeading?.nonEmpty
+                let attrTitle: String = (try? link.attr("title")) ?? ""
+                let textTitle: String = (try? link.text()) ?? ""
+                let altTitle: String = (try? image?.attr("alt")) ?? ""
+                let rawTitle: String = titleHeading ?? attrTitle.nonEmpty
+                    ?? textTitle.nonEmpty ?? altTitle.nonEmpty ?? ""
+                let clean = rawTitle.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                let slug: String = page.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                     .split(separator: "/").last.map(String.init) ?? ""
-                guard !clean.isEmpty, clean.count <= 110, !invalidTitles.contains(clean.lowercased()),
+                guard !clean.isEmpty, clean.count <= 110,
+                      !invalidTitles.contains(clean.lowercased()),
                       !invalidTitles.contains(slug.lowercased()) else { continue }
-                guard titleHeading != nil || image != nil || container != nil else { continue }
+                guard titleHeading != nil || image != nil else { continue }
 
                 var poster: URL?
                 if let image {
                     for attribute in ["data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"] {
-                        guard let raw = (try? image.attr(attribute))?.nonEmpty,
-                              !raw.hasPrefix("data:") else { continue }
-                        let candidate = raw.components(separatedBy: ",").first?
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let raw: String = (try? image.attr(attribute)) ?? ""
+                        guard !raw.isEmpty, !raw.hasPrefix("data:") else { continue }
+                        let firstSrcset: String = raw.components(separatedBy: ",").first ?? ""
+                        let candidate: String = firstSrcset.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
                             .components(separatedBy: " ").first ?? ""
                         if let resolved = absoluteURL(candidate, base: response.url), resolved.scheme == "https" {
                             poster = resolved
@@ -87,12 +92,13 @@ struct CatalogService {
                         }
                     }
                 }
-                let timeNode = try? container?.select("time[datetime], [itemprop=datePublished][content]").first()
-                let rawDate = ((try? timeNode?.attr("datetime")) ?? "").nonEmpty
-                    ?? ((try? timeNode?.attr("content")) ?? "").nonEmpty
-                let published = rawDate.flatMap {
-                    ISO8601DateFormatter().date(from: $0)
-                        ?? ISO8601DateFormatter().date(from: String($0.prefix(10)) + "T00:00:00Z")
+                let dateNode: Element? = try? parent?.select("time[datetime], [itemprop=datePublished][content]").first()
+                let dateValue: String = (try? dateNode?.attr("datetime")) ?? ""
+                let dateContent: String = (try? dateNode?.attr("content")) ?? ""
+                let rawDate: String? = dateValue.nonEmpty ?? dateContent.nonEmpty
+                let published: Date? = rawDate.flatMap { dateString in
+                    ISO8601DateFormatter().date(from: dateString)
+                        ?? ISO8601DateFormatter().date(from: String(dateString.prefix(10)) + "T00:00:00Z")
                 }
                 let item = MediaTitle(title: clean, pageURL: page, posterURL: poster,
                                       kind: kind, provider: provider, publishedAt: published,
