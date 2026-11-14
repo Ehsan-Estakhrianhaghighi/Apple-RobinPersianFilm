@@ -207,7 +207,7 @@ struct StreamResolver {
 
         guard !streams.isEmpty else {
             print("FarsiPlex native playback: no title-bound published MP4; checked \(checked) first-party player pages.")
-            throw AppProblem.noStream
+            throw AppProblem.browserPlaybackRequired
         }
         // Discover only variants of a signed filename actually published and
         // verified. Reuse its existing query unchanged; no token fabrication.
