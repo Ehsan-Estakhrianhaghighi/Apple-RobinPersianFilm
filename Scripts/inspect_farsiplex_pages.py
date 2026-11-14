@@ -115,6 +115,12 @@ for url in URLS:
                                             k:len(re.findall(re.escape(k),frame_text,re.I))
                                             for k in ("cdn2.farsiland.com","pl.farsiplex.buzz","video","source",
                                                       "fetch(","xmlhttprequest","player.setup","jwplayer(", ".mp4")})
+                                        if not globals().get("_printed_frame_hints",False):
+                                            globals()["_printed_frame_hints"] = True
+                                            for word in ("URLSearchParams", "fetch(", "new URL(", "source", "player.setup", "jwplayer(", ".replace(", "playlist", "file:", "token", "src:"):
+                                                hits=list(re.finditer(re.escape(word),frame_text,re.I))
+                                                contexts=[scrub(frame_text[max(0,m.start()-100):m.start()+150]) for m in hits[:2]]
+                                                print("frame-hint:",word,"hits:",len(hits),"contexts:",contexts)
                                         iframe = Trace()
                                         iframe.feed(frame_text)
                                         print("jwplayer scripts:",[
