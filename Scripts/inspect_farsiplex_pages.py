@@ -23,8 +23,15 @@ class Trace(HTMLParser):
         super().__init__()
         self.elements = []
         self.scripts = []
+        self.forms = []
+        self.current = None
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if tag == "form":
+            self.current = {"action": attrs.get("action",""), "method": attrs.get("method","get"), "id": attrs.get("id",""), "fields":[]}
+            self.forms.append(self.current)
+        elif tag == "input" and self.current is not None:
+            self.current["fields"].append((attrs.get("name",""), attrs.get("type","text"), bool(attrs.get("value"))))
         if tag == "script" and attrs.get("src"):
             self.scripts.append(attrs["src"])
         if tag in ("a", "iframe", "form", "video", "source", "button"):
@@ -32,6 +39,9 @@ class Trace(HTMLParser):
                  ("href","src","action","data-url","data-href","onclick","id","class","data-player","data-post","data-id")}
             if any(w in str(rec).lower() for w in KEYWORDS):
                 self.elements.append((tag,rec))
+
+    def handle_endtag(self, tag):
+        if tag == "form": self.current = None
 
 for url in URLS:
     print("\nTITLE:",url,flush=True)
@@ -45,6 +55,8 @@ for url in URLS:
         parser=Trace()
         parser.feed(html)
         print("status:",code,"final:",urlparse(final).path,"bytes:",len(raw))
+        for form in parser.forms:
+            print("form:",{"action":urlparse(form["action"]).path,"method":form["method"],"id":form["id"],"fields":form["fields"]})
         for tag,attrs in parser.elements[:25]:
             print("element:",tag,{k:scrub(v) for k,v in attrs.items()})
         for item in parser.scripts[:20]:
