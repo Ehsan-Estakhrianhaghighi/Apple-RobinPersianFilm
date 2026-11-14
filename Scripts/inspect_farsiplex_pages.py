@@ -47,6 +47,19 @@ class Trace(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "form": self.current = None
 
+# Compare provider-published public search listings for fallback availability.
+for q in ("Taxi","Balit","Mashghe Emshab","Ostokhan Sooz","Meymoone Mast"):
+    url = "https://farsiland.com/?"+urlencode({"s":q})
+    try:
+        with urlopen(Request(url,headers={"User-Agent":"Mozilla/5.0"}),timeout=9) as response:
+            html = response.read(200000).decode("utf-8",errors="replace")
+            print("farsiland-search",q,"status",response.status,
+                  "final-path",urlparse(response.geturl()).path,
+                  "matches",len(re.findall(r"/(?:movies|episodes|tvshows)/",html,re.I)),
+                  "bytes",len(html))
+    except Exception as e:
+        print("farsiland-search",q,"error",type(e).__name__)
+
 for url in URLS:
     print("\nTITLE:",url,flush=True)
     opener = build_opener(HTTPCookieProcessor(CookieJar()))
