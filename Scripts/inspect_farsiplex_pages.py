@@ -83,6 +83,14 @@ for url in URLS:
                           "final-host:",urlparse(follow_url).hostname,
                           "final-path:",urlparse(follow_url).path,
                           "bytes:",len(follow_html))
+                    # Print only host and path, never signed query tokens.
+                    decoded = follow_html.replace("\\/", "/").replace("&amp;","&")
+                    media = list(re.finditer(r'https?://[^\s"<>\\]+?\.(?:mp4|m3u8)(?:\?[^\s"<>\\]*)?',decoded,re.I))
+                    print("media-count",len(media))
+                    for m in media[:12]:
+                        u=urlparse(m.group(0).split("&quot;")[0])
+                        print("media:",{"host":u.hostname,"path":u.path,
+                                        "hasQuery":bool(u.query)})
                     follow = Trace()
                     follow.feed(follow_html)
                     for f2 in follow.forms:
