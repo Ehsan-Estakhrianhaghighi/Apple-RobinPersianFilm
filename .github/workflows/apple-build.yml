@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'Shared/**'
+      - 'Scripts/**'
+      - 'Assets.xcassets/**'
       - 'project.yml'
       - 'setup-mac.sh'
       - '.github/workflows/apple-build.yml'
