@@ -8,7 +8,7 @@ func makeIcon(width: Int, height: Int, transparent: Bool = false, markOnly: Bool
         let w = rect.width, h = rect.height
         if !transparent {
             NSColor(calibratedRed: 0.07, green: 0.09, blue: 0.20, alpha: 1).setFill()
-            rect.fill()
+            NSBezierPath(rect: rect).fill()
             NSColor(calibratedRed: 0.10, green: 0.18, blue: 0.36, alpha: 1).setFill()
             NSBezierPath(roundedRect: rect.insetBy(dx: w * 0.035, dy: h * 0.06),
                          xRadius: min(w,h)*0.13, yRadius: min(w,h)*0.13).fill()
