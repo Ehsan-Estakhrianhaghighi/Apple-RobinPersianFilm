@@ -18,6 +18,25 @@ struct LibraryRootView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
+                #if os(tvOS)
+                HStack(spacing: 14) {
+                    ForEach(LibraryTab.allCases) { section in
+                        Button {
+                            tab = section
+                        } label: {
+                            Text(section.rawValue)
+                                .font(.headline)
+                                .frame(minWidth: 132)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(tab == section ? .yellow : .gray)
+                        .accessibilityLabel(section.rawValue)
+                        .accessibilityAddTraits(tab == section ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+                #endif
                 HStack(spacing: 20) {
                     TextField("Search titles", text: $search)
                         #if os(iOS)
@@ -60,6 +79,7 @@ struct LibraryRootView: View {
                 }
             }
             .navigationTitle("RobinPersianFilm")
+            #if os(iOS)
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     Picker("Library", selection: $tab) {
@@ -67,11 +87,9 @@ struct LibraryRootView: View {
                             Text(option.rawValue).tag(option)
                         }
                     }
-                    #if os(tvOS)
-                    .frame(width: 280)
-                    #endif
                 }
             }
+            #endif
             .navigationDestination(for: MediaTitle.self) { item in
                 TitleDetailView(item: item)
             }
