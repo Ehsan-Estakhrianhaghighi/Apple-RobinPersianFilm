@@ -27,6 +27,39 @@ struct StreamResolver {
         }
     }
 
+    /// An Android browser session may publish a signed FarsiPlex MP4 URL that
+    /// tvOS cannot discover without a browser engine. Accept that exact URL
+    /// when the user provides it, verify it, and test only signed filename
+    /// quality variants. Never fabricate or persist expiring tokens.
+    func resolveFarsiPlexPublishedURL(_ text: String) async throws -> [MediaStream] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), url.scheme == "https",
+              url.host?.lowercased() == "pl.farsiplex.buzz",
+              url.path.lowercased().hasSuffix(".mp4"),
+              await http.verifyMP4(url) else { throw AppProblem.noStream }
+
+        let quality = firstRegexCapture(
+            #"[.-](360|480|720|1080)(?=(?:\.[^./]+)*\.mp4$)"#,
+            in: url.path
+        ).flatMap(Int.init) ?? 720
+        var available = [MediaStream(url: url, quality: quality, source: "FarsiPlex")]
+        let pattern = #"[.-](360|480|720|1080)(?=(?:\.[^./]+)*\.mp4$)"#
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+           let match = regex.firstMatch(in: url.path, range: NSRange(url.path.startIndex..., in: url.path)),
+           let range = Range(match.range(at: 1), in: url.path) {
+            for candidateQuality in [480, 720, 1080] where candidateQuality != quality {
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                var path = url.path
+                path.replaceSubrange(range, with: String(candidateQuality))
+                components?.path = path
+                if let candidate = components?.url, await http.verifyMP4(candidate) {
+                    available.append(MediaStream(url: candidate, quality: candidateQuality, source: "FarsiPlex"))
+                }
+            }
+        }
+        return available.sorted { $0.quality < $1.quality }
+    }
+
     private func resolveFarsiLand(pageURL: URL) async throws -> [MediaStream] {
         let first = try await http.page(pageURL)
         guard let watch = try first.document.select("form[action]").array().first(where: {
