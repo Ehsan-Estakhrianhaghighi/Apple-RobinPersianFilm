@@ -107,7 +107,7 @@ for url in URLS:
                                                 "type":result.headers.get("Content-Type",""),
                                                 "length":result.headers.get("Content-Length","")})
                                     except Exception as e:
-                                        print("media-head-error:",type(e).__name__,str(e)[:100])
+                                        print("media-head-error:",type(e).__name__,scrub(str(e)))
                     follow = Trace()
                     follow.feed(follow_html)
                     for f2 in follow.forms:
