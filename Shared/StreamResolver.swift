@@ -183,6 +183,7 @@ struct StreamResolver {
         // Try the first-party title -> quick view -> HQ player route. A single
         // page fetch was insufficient for the current FarsiPlex page structure.
         var routes = publishedPlaybackRoutes(in: first)
+        let initialRoutes = routes.count
         var visited = Set<String>()
         var checked = 0
         while !routes.isEmpty && checked < 8 && streams.isEmpty {
@@ -207,7 +208,7 @@ struct StreamResolver {
 
         guard !streams.isEmpty else {
             print("FarsiPlex native playback: no title-bound published MP4; checked \(checked) first-party player pages.")
-            throw AppProblem.browserPlaybackRequired
+            throw AppProblem.browserPlaybackRequired(publishedRoutes: initialRoutes, visitedRoutes: checked)
         }
         // Discover only variants of a signed filename actually published and
         // verified. Reuse its existing query unchanged; no token fabrication.
