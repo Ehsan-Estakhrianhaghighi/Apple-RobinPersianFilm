@@ -28,7 +28,7 @@ targets:
       - name: Generate RobinPersianFilm app icon
         script: |
           cd "$SRCROOT"
-          /usr/bin/swift Scripts/GenerateIcons.swift
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" /usr/bin/swift Scripts/GenerateIcons.swift
         basedOnDependencyAnalysis: false
     settings:
       base:
@@ -49,7 +49,7 @@ targets:
       - name: Generate RobinPersianFilm app icon
         script: |
           cd "$SRCROOT"
-          /usr/bin/swift Scripts/GenerateIcons.swift
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" /usr/bin/swift Scripts/GenerateIcons.swift
         basedOnDependencyAnalysis: false
     settings:
       base:
