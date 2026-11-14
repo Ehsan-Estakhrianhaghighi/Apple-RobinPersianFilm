@@ -26,6 +26,16 @@ struct CatalogService {
         }
     }
 
+    // Keep a matching FarsiLand title as a playback-only fallback if the preferred
+    // FarsiPlex listing does not publish a playable native stream.
+    func farsiLandFallback(for original: MediaTitle) async -> MediaTitle? {
+        guard original.provider == .farsiPlex else { return nil }
+        let alternatives = (try? await loadProvider(kind: original.kind, provider: .farsiLand)) ?? []
+        return alternatives.first {
+            normalizedTitle($0.title) == normalizedTitle(original.title)
+        }
+    }
+
     private func loadProvider(kind: MediaKind, provider: Provider) async throws -> [MediaTitle] {
         let prefix = provider == .farsiPlex ? "https://farsiplex.com" : "https://farsiland.com"
         let listing = provider == .farsiPlex ? (kind == .movie ? "/movie/" : "/tvshow/")
