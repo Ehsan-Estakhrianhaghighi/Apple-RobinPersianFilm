@@ -97,6 +97,17 @@ for url in URLS:
                                 print("media-query:", {"key":k,"valueHost":inner.hostname,
                                     "valuePath":inner.path if inner.hostname else "",
                                     "length":len(val)})
+                                if k == "source" and inner.hostname in {"cdn2.farsiland.com","pl.farsiplex.buzz"}:
+                                    try:
+                                        check = Request(val,method="HEAD",
+                                            headers={"User-Agent":"Mozilla/5.0 Chrome/120.0 Safari/537.36",
+                                                     "Referer":follow_url})
+                                        with opener.open(check,timeout=8) as result:
+                                            print("media-head:",{"status":result.status,
+                                                "type":result.headers.get("Content-Type",""),
+                                                "length":result.headers.get("Content-Length","")})
+                                    except Exception as e:
+                                        print("media-head-error:",type(e).__name__,str(e)[:100])
                     follow = Trace()
                     follow.feed(follow_html)
                     for f2 in follow.forms:
