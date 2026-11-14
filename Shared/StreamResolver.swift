@@ -48,15 +48,29 @@ struct StreamResolver {
     private func resolveFarsiPlex(pageURL: URL) async throws -> [MediaStream] {
         let first = try await http.page(pageURL)
         var streams = publishedStreams(in: first.html, source: "FarsiPlex")
+        streams += linkedMP4Streams(in: first, source: "FarsiPlex")
         if streams.isEmpty {
-            // Only follow player links actually published by the selected title.
-            let nodes = (try? first.document.select("a[href], iframe[src]").array()) ?? []
-            for node in nodes.prefix(120) {
-                let raw = (try? node.attr(node.tagName() == "iframe" ? "src" : "href")) ?? ""
-                guard let url = absoluteURL(raw, base: first.url), hostMatches(url, "farsiplex.com"),
-                      url.path.contains("play-") else { continue }
+            // Visit player pages published by this title. A generic player page
+            // without title-specific context cannot identify which movie to load.
+            let nodes = (try? first.document.select("a[href], iframe[src], [data-href], [data-url]").array()) ?? []
+            var visited = Set<URL>()
+            for node in nodes.prefix(180) {
+                let attribute = node.tagName() == "iframe" ? "src"
+                    : (node.hasAttr("href") ? "href" : (node.hasAttr("data-href") ? "data-href" : "data-url"))
+                let raw = (try? node.attr(attribute)) ?? ""
+                guard let url = absoluteURL(raw, base: first.url),
+                      hostMatches(url, "farsiplex.com"),
+                      url.path.contains("play-") || url.path.contains("/watch/"),
+                      visited.insert(url).inserted else { continue }
+                // Without a query or dedicated player slug, this route can be a
+                // shared landing page requiring an interactive browser session.
+                let hasContext = url.query != nil ||
+                    url.path.split(separator: "/").count > 1 ||
+                    node.tagName() == "iframe"
+                guard hasContext else { continue }
                 guard let page = try? await http.page(url, referer: first.url) else { continue }
-                streams = publishedStreams(in: page.html, source: "FarsiPlex")
+                streams += publishedStreams(in: page.html, source: "FarsiPlex")
+                streams += linkedMP4Streams(in: page, source: "FarsiPlex")
                 if !streams.isEmpty { break }
             }
         }
@@ -84,6 +98,32 @@ struct StreamResolver {
         }
         guard !valid.isEmpty else { throw AppProblem.noStream }
         return valid.sorted { $0.quality < $1.quality }
+    }
+
+    // Some provider pages publish a relative file URL in a source, link,
+    // or data attribute rather than an absolute URL inside player JavaScript.
+    private func linkedMP4Streams(in page: PageResponse, source: String) -> [MediaStream] {
+        let nodes = (try? page.document.select(
+            "a[href], video[src], source[src], iframe[src], [data-src], [data-url]"
+        ).array()) ?? []
+        var seen = Set<URL>()
+        var results: [MediaStream] = []
+        for node in nodes {
+            for attribute in ["href", "src", "data-src", "data-url"] {
+                guard node.hasAttr(attribute),
+                      let value = try? node.attr(attribute),
+                      let url = absoluteURL(value, base: page.url),
+                      url.scheme == "https",
+                      ["pl.farsiplex.buzz", "pl.farsiland.buzz"].contains(url.host?.lowercased() ?? ""),
+                      url.path.lowercased().hasSuffix(".mp4"),
+                      seen.insert(url).inserted else { continue }
+                let quality = firstRegexCapture(
+                    #"[.-](480|720|1080)(?=(?:\.[^./?]+)*\.mp4)"#, in: url.path
+                ).flatMap(Int.init) ?? 720
+                results.append(MediaStream(url: url, quality: quality, source: source))
+            }
+        }
+        return results
     }
 
     private func formFields(_ form: Element) -> [(String, String)] {
