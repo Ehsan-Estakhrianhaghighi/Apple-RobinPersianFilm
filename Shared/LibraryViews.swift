@@ -19,23 +19,30 @@ struct LibraryRootView: View {
         NavigationStack {
             VStack(spacing: 12) {
                 #if os(tvOS)
-                HStack(spacing: 14) {
-                    ForEach(LibraryTab.allCases) { section in
-                        Button {
-                            tab = section
-                        } label: {
-                            Text(section.rawValue)
-                                .font(.headline)
-                                .frame(minWidth: 132)
+                ScrollView(.horizontal) {
+                    HStack(spacing: 16) {
+                        ForEach(LibraryTab.allCases) { section in
+                            Button {
+                                tab = section
+                            } label: {
+                                Text(section.rawValue)
+                                    .font(.headline)
+                                    .foregroundStyle(tab == section ? Color.black : Color.white)
+                                    .frame(minWidth: 158, minHeight: 46)
+                                    .padding(.horizontal, 10)
+                                    .background(
+                                        tab == section ? Color.yellow : Color.white.opacity(0.12),
+                                        in: RoundedRectangle(cornerRadius: 14)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(section.rawValue)
+                            .accessibilityAddTraits(tab == section ? .isSelected : [])
                         }
-                        .buttonStyle(.bordered)
-                        .tint(tab == section ? .yellow : .gray)
-                        .accessibilityLabel(section.rawValue)
-                        .accessibilityAddTraits(tab == section ? .isSelected : [])
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 15)
                 }
-                .padding(.horizontal)
-                .padding(.top, 12)
                 #endif
                 HStack(spacing: 20) {
                     TextField("Search titles", text: $search)
